@@ -69,9 +69,10 @@ $(dir_out)/3ds/$(name):
 	@mv $(dir_out)/$(name).3dsx $@
 	@mv $(dir_out)/$(name).smdh $@
 
-$(dir_out)/aureinand:
+$(dir_out)/aureinand: $(dir_data)/splash.bin
 	@mkdir -p "$(dir_out)/aureinand"
-
+	@cp -av $(dir_data)/* $@
+	
 $(dir_out)/aureinand/emunand/emunand.bin: $(dir_emu)/emuCode.s
 	@armips $<
 	@mkdir -p "$(dir_out)/aureinand/emunand"
