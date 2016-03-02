@@ -30,10 +30,10 @@ void setupCFW(void){
     pressed = HID_PAD;
 
     //Determine if A9LH is installed via PDN_SPI_CNT and an user flag
-    if((*((u8*)0x101401C0) == 0x0) || fileExists("/rei/installeda9lh")){
+    if((*((u8*)0x101401C0) == 0x0) || fileExists("/aureinand/installeda9lh")){
         a9lhSetup = 1;
         //Check flag for > 9.2 SysNAND
-        if(fileExists("/rei/updatedsysnand")) updatedSys = 1;
+        if(fileExists("/aureinand/updatedsysnand")) updatedSys = 1;
     }
 
     /* If SELECT is pressed, and on an updated SysNAND setup the SAFE MODE combo
@@ -54,8 +54,8 @@ u8 loadFirm(void){
     }
     //Load FIRM from SD
     else{
-        char firmPath[] = "/rei/firmware.bin";
-        char firmPath2[] = "/rei/firmware90.bin";
+        char firmPath[] = "/aureinand/firmware.bin";
+        char firmPath2[] = "/aureinand/firmware90.bin";
         char *pathPtr = mode ? firmPath : firmPath2;
         firmSize = fileSize(pathPtr);
         if (!firmSize) return 1;
@@ -84,7 +84,7 @@ u8 loadEmu(void){
         emuCodeOffset = 0;
 
     //Read emunand code from SD
-    char path[] = "/rei/emunand/emunand.bin";
+    char path[] = "/aureinand/emunand/emunand.bin";
     u32 size = fileSize(path);
     if (!size) return 1;
     if(!console || !mode) nandRedir[5] = 0xA4;
@@ -158,7 +158,7 @@ u8 patchFirm(void){
             fOpenOffset = 0;
 
         //Read reboot code from SD
-        char path[] = "/rei/reboot/reboot.bin";
+        char path[] = "/aureinand/reboot/reboot.bin";
         u32 size = fileSize(path);
         if (!size) return 1;
         getReboot(firmLocation, firmSize, &rebootOffset);
@@ -170,7 +170,7 @@ u8 patchFirm(void){
         *pos_fopen = fOpenOffset;
 
         //Write patched FIRM to SD
-        if(fileWrite((u8*)firmLocation, "/rei/patched_firmware.bin", firmSize) != 0) return 1;
+        if(fileWrite((u8*)firmLocation, "/aureinand/patched_firmware.bin", firmSize) != 0) return 1;
     }
 
     return 0;
