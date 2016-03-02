@@ -36,9 +36,9 @@ void setupCFW(void){
         if(fileExists("/rei/updatedsysnand")) updatedSys = 1;
     }
 
-    /* If L is pressed, and on an updated SysNAND setup the SAFE MODE combo
+    /* If SELECT is pressed, and on an updated SysNAND setup the SAFE MODE combo
        is not pressed, boot 9.0 FIRM */
-    if((pressed & BUTTON_L1) && !(updatedSys && pressed == SAFEMODE)) mode = 0;
+    if((pressed & BUTTON_SELECT) && !(updatedSys && pressed == SAFEMODE)) mode = 0;
 }
 
 //Load firm into FCRAM
@@ -125,10 +125,10 @@ u8 loadEmu(void){
 //Patches
 u8 patchFirm(void){
 
-    /* If L or R aren't pressed on a 9.0/9.2 SysNAND, or the 9.0 FIRM is selected
-       or R is pressed on a > 9.2 SysNAND, boot emuNAND */
-    if((updatedSys && (!mode || ((pressed & BUTTON_R1) && pressed != SAFEMODE))) ||
-       (!updatedSys && mode && !(pressed & BUTTON_R1))){
+    /* If SELECT or START aren't pressed on a 9.0/9.2 SysNAND, or the 9.0 FIRM is selected
+       or START is pressed on a > 9.2 SysNAND, boot emuNAND */
+    if((updatedSys && (!mode || ((pressed & BUTTON_START) && pressed != SAFEMODE))) ||
+       (!updatedSys && mode && !(pressed & BUTTON_START))){
         if (loadEmu()) return 1;
     }
     else if (a9lhSetup){
