@@ -61,7 +61,7 @@ $(dir_out)/$(name).dat: $(dir_build)/main.bin $(dir_out)/aureinand
 	dd if=$(dir_build)/main.bin of=$@ bs=512 seek=144
 
 $(dir_out)/arm9loaderhax.bin: $(dir_build)/main.bin $(dir_out)/aureinand
-	@cp -av $(dir_build)/main.bin $(dir_out)/arm9loaderhax.bin
+	@cp -av $(dir_build)/main.bin $(dir_out)/aureinand/arm9loaderhax.bin
 
 $(dir_out)/3ds/$(name):
 	@mkdir -p "$(dir_out)/3ds/$(name)"
