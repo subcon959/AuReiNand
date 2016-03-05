@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include "memory.h"
 #include "fatfs/sdmmc/sdmmc.h"
-#include "fatfs/ff.h"
 
 //Nand key#2 (0x12C10)
 u8 key2[0x10] = {
@@ -236,128 +235,6 @@ void sha_wait_idle()
 	while(*REG_SHA_CNT & 1);
 }
 
-void sha(void* res, const void* src, u32 size, u32 mode)
-{
-	sha_wait_idle();
-	*REG_SHA_CNT = mode | SHA_CNT_OUTPUT_ENDIAN | SHA_NORMAL_ROUND;
-	
-	const u32* src32	= (const u32*)src;
-	int i;
-	while(size >= 0x40)
-	{
-		sha_wait_idle();
-		for(i = 0; i < 4; ++i)
-		{
-			*REG_SHA_INFIFO = *src32++;
-			*REG_SHA_INFIFO = *src32++;
-			*REG_SHA_INFIFO = *src32++;
-			*REG_SHA_INFIFO = *src32++;
-		}
-
-		size -= 0x40;
-	}
-	
-	sha_wait_idle();
-	memcpy((void*)REG_SHA_INFIFO, src32, size);
-	
-	*REG_SHA_CNT = (*REG_SHA_CNT & ~SHA_NORMAL_ROUND) | SHA_FINAL_ROUND;
-	
-	while(*REG_SHA_CNT & SHA_FINAL_ROUND);
-	sha_wait_idle();
-	
-	u32 hashSize = SHA_256_HASH_SIZE;
-	if(mode == SHA_224_MODE)
-		hashSize = SHA_224_HASH_SIZE;
-	else if(mode == SHA_1_MODE)
-		hashSize = SHA_1_HASH_SIZE;
-
-	memcpy(res, (void*)REG_SHA_HASH, hashSize);
-}
-
-void rsa_wait_idle()
-{
-	while(*REG_RSA_CNT & 1);
-}
-
-void rsa_use_keyslot(u32 keyslot)
-{
-	*REG_RSA_CNT = (*REG_RSA_CNT & ~RSA_CNT_KEYSLOTS) | (keyslot << 4);
-}
-
-void rsa_setkey(u32 keyslot, const void* mod, const void* exp, u32 mode)
-{
-	rsa_wait_idle();
-	*REG_RSA_CNT = (*REG_RSA_CNT & ~RSA_CNT_KEYSLOTS) | (keyslot << 4) | RSA_IO_BE | RSA_IO_NORMAL;
-	
-	u32 size = mode * 4;
-	
-	volatile u32* keyslotCnt = REG_RSA_SLOT0 + (keyslot << 4);
-	keyslotCnt[0] &= ~(RSA_SLOTCNT_KEY_SET | RSA_SLOTCNT_WPROTECT);
-	keyslotCnt[1] = mode;
-	
-	memcpy((void*)REG_RSA_MOD_END - size, mod, size);
-	
-	if(exp == NULL)
-	{
-		size -= 4;
-		while(size)
-		{
-			*REG_RSA_EXPFIFO = 0;
-			size -= 4;
-		}
-		*REG_RSA_EXPFIFO = 0x01000100; // 0x00010001 byteswapped
-	}
-	else
-	{
-		const u32* exp32 = (const u32*)exp;
-		while(size)
-		{
-			*REG_RSA_EXPFIFO = *exp32++;
-			size -= 4;
-		}
-	}
-}
-
-int rsa_iskeyset(u32 keyslot)
-{
-	return *(REG_RSA_SLOT0 + (keyslot << 4)) & 1;
-}
-
-void rsa(void* dst, const void* src, u32 size)
-{
-	u32 keyslot = (*REG_RSA_CNT & RSA_CNT_KEYSLOTS) >> 4;
-	if(rsa_iskeyset(keyslot) == 0)
-		return;
-
-	rsa_wait_idle();
-	*REG_RSA_CNT |= RSA_IO_BE | RSA_IO_NORMAL;
-	
-	// Pad the message with zeroes so that it's a multiple of 8
-	// and write the message with the end aligned with the register
-	u32 padSize = ((size + 7) & ~7) - size;
-	memset((void*)REG_RSA_TXT_END - (size + padSize), 0, padSize);
-	memcpy((void*)REG_RSA_TXT_END - size, src, size);
-	
-	// Start
-	*REG_RSA_CNT |= RSA_CNT_START;
-	
-	rsa_wait_idle();
-	memcpy(dst, (void*)REG_RSA_TXT_END - size, size);
-}
-
-int rsa_verify(const void* data, u32 size, const void* sig, u32 mode)
-{
-	u8 dataHash[SHA_256_HASH_SIZE];
-	sha(dataHash, data, size, SHA_256_MODE);
-	
-	u8 decSig[0x100]; // Way too big, need to request a work area
-	
-	u32 sigSize = mode * 4;
-	rsa(decSig, sig, sigSize);
-	
-	return memcmp(dataHash, decSig + (sigSize - SHA_256_HASH_SIZE), SHA_256_HASH_SIZE) == 0;
-}
-
 /****************************************************************
 *                   Nand/FIRM Crypto stuff
 ****************************************************************/
@@ -390,36 +267,37 @@ void decArm9Bin(void *armHdr, u8 mode){
     u32 slot = mode ? 0x16 : 0x15;
 
     //Setup keys needed for arm9bin decryption
-    memcpy((u8*)keyY, (void *)(armHdr+0x10), 0x10);
-    memcpy((u8*)CTR, (void *)(armHdr+0x20), 0x10);
-    u32 size = atoi((void *)(armHdr+0x30));
+    memcpy(keyY, armHdr+0x10, 0x10);
+    memcpy(CTR, armHdr+0x20, 0x10);
+    u32 size = atoi(armHdr+0x30);
 
     if(mode){
         //Set 0x11 to key2 for the arm9bin and misc keys
-        aes_setkey(0x11, (u8*)key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
+        aes_setkey(0x11, key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
         aes_use_keyslot(0x11);
-        aes((u8*)keyX, (void *)(armHdr+0x60), 1, NULL, AES_ECB_DECRYPT_MODE, 0);
-        aes_setkey(slot, (u8*)keyX, AES_KEYX, AES_INPUT_BE | AES_INPUT_NORMAL);
+        aes(keyX, armHdr+0x60, 1, NULL, AES_ECB_DECRYPT_MODE, 0);
+        aes_setkey(slot, keyX, AES_KEYX, AES_INPUT_BE | AES_INPUT_NORMAL);
     }
 
-    aes_setkey(slot, (u8*)keyY, AES_KEYY, AES_INPUT_BE | AES_INPUT_NORMAL);
-    aes_setiv((u8*)CTR, AES_INPUT_BE | AES_INPUT_NORMAL);
+    aes_setkey(slot, keyY, AES_KEYY, AES_INPUT_BE | AES_INPUT_NORMAL);
+    aes_setiv(CTR, AES_INPUT_BE | AES_INPUT_NORMAL);
     aes_use_keyslot(slot);
 
     //Decrypt arm9bin
-    aes((void *)(armHdr+0x800), (void *)(armHdr+0x800), size/AES_BLOCK_SIZE, CTR, AES_CTR_MODE, AES_INPUT_BE | AES_INPUT_NORMAL);
+    aes(armHdr+0x800, armHdr+0x800, size/AES_BLOCK_SIZE, CTR, AES_CTR_MODE, AES_INPUT_BE | AES_INPUT_NORMAL);
 }
 
 //Sets the N3DS 9.6 KeyXs
 void setKeyXs(void *armHdr){
 
     //Set keys 0x19..0x1F keyXs
-    u8* decKey = (void *)(armHdr+0x89824);
-    aes_setkey(0x11, (u8*)key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
+    void *keyData = armHdr+0x89814;
+    void *decKey = keyData+0x10;
+    aes_setkey(0x11, key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
     aes_use_keyslot(0x11);
     for(u32 slot = 0x19; slot < 0x20; slot++){
-        aes(decKey, (void *)(armHdr+0x89814), 1, NULL, AES_ECB_DECRYPT_MODE, 0);
-        aes_setkey(slot, (u8*)decKey, AES_KEYX, AES_INPUT_BE | AES_INPUT_NORMAL);
-        *(u8*)(armHdr+0x89814+0xF) += 1;
+        aes(decKey, keyData, 1, NULL, AES_ECB_DECRYPT_MODE, 0);
+        aes_setkey(slot, decKey, AES_KEYX, AES_INPUT_BE | AES_INPUT_NORMAL);
+        *(u8*)(keyData+0xF) += 1;
     }
 }
