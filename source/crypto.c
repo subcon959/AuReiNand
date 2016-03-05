@@ -230,11 +230,6 @@ void aes(void* dst, const void* src, u32 blockCount, void* iv, u32 mode, u32 ivM
 	}
 }
 
-void sha_wait_idle()
-{
-	while(*REG_SHA_CNT & 1);
-}
-
 /****************************************************************
 *                   Nand/FIRM Crypto stuff
 ****************************************************************/
