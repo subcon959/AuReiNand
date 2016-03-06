@@ -25,33 +25,37 @@ u16 pressed;
 char *firmPathPatched = NULL;
 
 void setupCFW(void){
-	
-    u8 overrideConfig = 0;
 
+    //Determine if booting with A9LH via PDN_SPI_CNT
+    u8 a9lhBoot = (*(u8*)0x101401C0 == 0x0) ? 1 : 0;
+    //Retrieve the last booted FIRM via CFG_BOOTENV
+    u8 previousFirm = *(u8*)0x10010000;	
+    u8 overrideConfig = 0;
+    char lastConfigPath[] = "aureinand/lastbootcfg";
+	
     //Detect the console being used
     if(PDN_MPCORE_CFG == 1) console = 0;
 
     //Get pressed buttons
     pressed = HID_PAD;
 
-    //Determine if A9LH is installed via PDN_SPI_CNT and an user flag
-    if((*(u8*)0x101401C0 == 0x0) || fileExists("/aureinand/installeda9lh")){
+    //Determine if A9LH is installed
+    if(a9lhBoot || fileExists("/aureinand/installeda9lh")){
         a9lhSetup = 1;
         //Check flag for > 9.2 SysNAND
         if(fileExists("/aureinand/updatedsysnand")) updatedSys = 1;
     }
 
-    //If using A9LH and it's a MCU reboot, try to force boot options
-    if(a9lhSetup && *(u8*)0x10010000 && fileExists("aureinand/lastbootcfg")){
+    //If booting with A9LH and it's a MCU reboot, try to force boot options
+    if(a9lhBoot && previousFirm && fileExists(lastConfigPath)){
         u8 tempConfig;
-        fileRead((u8*)&tempConfig, "aureinand/lastbootcfg", 1);
+        fileRead((u8*)&tempConfig, lastConfigPath, 1);
 
         //Always force a sysNAND boot when quitting AGB_FIRM
-        if(*(u8*)0x10010000 == 0x7) {
-            mode = updatedSys ? 1 : (tempConfig & 0x1);
-            emuNAND = 0;
+        if(previousFirm == 0x7) {
+            if(!updatedSys) mode = tempConfig & 0x1;
             overrideConfig = 1;
-        //Else, force the last boot options unless A is pressed
+        //Else, force the last used boot options unless A is pressed
         } else if(!(pressed & BUTTON_A)) {
             mode = tempConfig & 0x1;
             emuNAND = (tempConfig >> 1) & 0x1;
@@ -71,9 +75,9 @@ void setupCFW(void){
            (!updatedSys && mode && !(pressed & BUTTON_START))) emuNAND = 1;
 
         //Write the current boot options on A9LH
-        if(a9lhSetup){
+        if(a9lhBoot){
             u8 tempConfig = (mode | (emuNAND << 1)) & 0x3;
-            fileWrite((u8*)&tempConfig, "aureinand/lastbootcfg", 1);
+            fileWrite((u8*)&tempConfig, lastConfigPath, 1);
         }
     }
 
@@ -84,7 +88,7 @@ void setupCFW(void){
     if(fileExists("/aureinand/usepatchedfw")){
         //Only needed with this flag
         if(!mode) firmPathPatched = "/aureinand/patched_firmware90.bin";
-        if (fileExists(firmPathPatched)) usePatchedFirm = 1;
+        if(fileExists(firmPathPatched)) usePatchedFirm = 1;
     }	
 }
 
@@ -97,26 +101,26 @@ u8 loadFirm(void){
         firmSize = console ? 0xF2000 : 0xE9000;
         nandFirm0((u8*)firmLocation, firmSize, console);
         //Check for correct decryption
-        if(memcmp((u8*)firmLocation, "FIRM", 4) != 0) return 1;
+        if(memcmp((u8*)firmLocation, "FIRM", 4) != 0) return 0;
     }
     //Load FIRM from SD
     else{
         char *path = usePatchedFirm ? firmPathPatched :
                                       (mode ? "/aureinand/firmware.bin" : "/aureinand/firmware90.bin");
         firmSize = fileSize(path);
-        if (!firmSize) return 1;
+        if(!firmSize) return 0;
         fileRead((u8*)firmLocation, path, firmSize);
     }
 
     section = firmLocation->section;
 
     //Check that the loaded FIRM matches the console
-    if((((u32)section[2].address >> 8) & 0xFF) != (console ? 0x60 : 0x68)) return 1;
+    if((((u32)section[2].address >> 8) & 0xFF) != (console ? 0x60 : 0x68)) return 0;
 
     if(console && !usePatchedFirm)
         decArm9Bin((u8*)firmLocation + section[2].offset, mode);
 	
-    return 0;
+    return 1;
 }
 
 //Nand redirection
@@ -133,7 +137,7 @@ u8 loadEmu(void){
     //Read emunand code from SD
     char path[] = "/aureinand/emunand/emunand.bin";
     u32 size = fileSize(path);
-    if (!size) return 1;
+    if(!size) return 0;
     if(!console || !mode) nandRedir[5] = 0xA4;
     //Find offset for emuNAND code from the offset in nandRedir
     u8 *emuCodeTmp = &nandRedir[4];
@@ -166,20 +170,20 @@ u8 loadEmu(void){
     //Set MPU for emu code region
     memcpy((u8*)mpuOffset, mpu, sizeof(mpu));
 
-    return 0;
+    return 1;
 }
 
 //Patches
 u8 patchFirm(void){
 	
     //Skip patching	
-    if(usePatchedFirm) return 0;
+    if(usePatchedFirm) return 1;
 
 	//Apply emuNAND patches
     if(emuNAND){
-        if (loadEmu()) return 1;
+        if(loadEmu()) return 0;
     }
-    else if (a9lhSetup){
+    else if(a9lhSetup){
         //Patch FIRM partitions writes on SysNAND to protect A9LH
         u32 writeOffset = 0;
         getFIRMWrite(firmLocation, firmSize, &writeOffset);
@@ -206,9 +210,9 @@ u8 patchFirm(void){
             fOpenOffset = 0;
 
         //Read reboot code from SD
-        char *path = "/aureinand/reboot/reboot.bin";
+        char path[] = "/aureinand/reboot/reboot.bin";
         u32 size = fileSize(path);
-        if (!size) return 1;
+        if(!size) return 0;
         getReboot(firmLocation, firmSize, &rebootOffset);
         fileRead((u8*)rebootOffset, path, size);
 
@@ -226,9 +230,9 @@ u8 patchFirm(void){
 	
     //Write patched FIRM to SD if needed
     if(firmPathPatched)
-        if(fileWrite((u8*)firmLocation, firmPathPatched, firmSize) != 0) return 1;
+        if(!fileWrite((u8*)firmLocation, firmPathPatched, firmSize)) return 0;
 
-    return 0;
+    return 1;
 }
 
 void launchFirm(void){
