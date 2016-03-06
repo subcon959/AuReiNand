@@ -1,15 +1,8 @@
 // From http://github.com/b1l1s/ctr
 
 #include "crypto.h"
-
-#include <stddef.h>
 #include "memory.h"
 #include "fatfs/sdmmc/sdmmc.h"
-
-//Nand key#2 (0x12C10)
-u8 key2[0x10] = {
-    0x42, 0x3F, 0x81, 0x7A, 0x23, 0x52, 0x58, 0x31, 0x6E, 0x75, 0x8E, 0x3A, 0x39, 0x43, 0x2E, 0xD0
-};
 
 /****************************************************************
 *                   Crypto Libs
@@ -64,7 +57,7 @@ __asm__\
 void aes_setkey(u8 keyslot, const void* key, u32 keyType, u32 mode)
 {
 	if(keyslot <= 0x03) return; // Ignore TWL keys for now
-	u32* key32 = (u32*)key;
+	u32 * key32 = (u32 *)key;
 	*REG_AESCNT = (*REG_AESCNT & ~(AES_CNT_INPUT_ENDIAN | AES_CNT_INPUT_ORDER)) | mode;
 	*REG_AESKEYCNT = (*REG_AESKEYCNT >> 6 << 6) | keyslot | AES_KEYCNT_WRITE;
 
@@ -85,7 +78,7 @@ void aes_use_keyslot(u8 keyslot)
 
 void aes_setiv(const void* iv, u32 mode)
 {
-	const u32* iv32 = (const u32*)iv;
+	const u32 *iv32 = (const u32 *)iv;
 	*REG_AESCNT = (*REG_AESCNT & ~(AES_CNT_INPUT_ENDIAN | AES_CNT_INPUT_ORDER)) | mode;
 
 	// Word order for IV can't be changed in REG_AESCNT and always default to reversed
@@ -105,9 +98,9 @@ void aes_setiv(const void* iv, u32 mode)
 	}
 }
 
-void aes_advctr(void* ctr, u32 val, u32 mode)
+void aes_advctr(void *ctr, u32 val, u32 mode)
 {
-	u32* ctr32 = (u32*)ctr;
+	u32 *ctr32 = (u32*)ctr;
 	
 	int i;
 	if(mode & AES_INPUT_BE)
@@ -132,9 +125,9 @@ void aes_advctr(void* ctr, u32 val, u32 mode)
 	}
 }
 
-void aes_change_ctrmode(void* ctr, u32 fromMode, u32 toMode)
+void aes_change_ctrmode(void *ctr, u32 fromMode, u32 toMode)
 {
-	u32* ctr32 = (u32*)ctr;
+	u32 *ctr32 = (u32 *)ctr;
 	int i;
 	if((fromMode ^ toMode) & AES_CNT_INPUT_ENDIAN)
 	{
@@ -154,13 +147,13 @@ void aes_change_ctrmode(void* ctr, u32 fromMode, u32 toMode)
 	}
 }
 
-void aes_batch(void* dst, const void* src, u32 blockCount)
+void aes_batch(void *dst, const void *src, u32 blockCount)
 {
 	*REG_AESBLKCNT = blockCount << 16;
 	*REG_AESCNT |=	AES_CNT_START;
 	
-	const u32* src32	= (const u32*)src;
-	u32* dst32			= (u32*)dst;
+	const u32 *src32	= (const u32 *)src;
+	u32 *dst32			= (u32 *)dst;
 	
 	u32 wbc = blockCount;
 	u32 rbc = blockCount;
@@ -187,7 +180,7 @@ void aes_batch(void* dst, const void* src, u32 blockCount)
 	}
 }
 
-void aes(void* dst, const void* src, u32 blockCount, void* iv, u32 mode, u32 ivMode)
+void aes(void *dst, const void *src, u32 blockCount, void *iv, u32 mode, u32 ivMode)
 {
 	*REG_AESCNT =	mode |
 					AES_CNT_INPUT_ORDER | AES_CNT_OUTPUT_ORDER |
@@ -234,16 +227,20 @@ void aes(void* dst, const void* src, u32 blockCount, void* iv, u32 mode, u32 ivM
 *                   Nand/FIRM Crypto stuff
 ****************************************************************/
 
+//Nand key#2 (0x12C10)
+u8 key2[0x10] = {
+    0x42, 0x3F, 0x81, 0x7A, 0x23, 0x52, 0x58, 0x31, 0x6E, 0x75, 0x8E, 0x3A, 0x39, 0x43, 0x2E, 0xD0
+};
+
 //Get Nand CTR key
-void getNandCTR(u8 *buf, u8 console) {
-    u8 *addr = console ? (u8*)0x080D8BBC : (u8*)0x080D797C;
-    u8 keyLen = 0x10; //CTR length
-    addr += 0x0F;
-    while (keyLen --) { *(buf++) = *(addr--); }
+void getNandCTR(u8 *buf, u32 console){
+    u8 *addr = (console ? (u8 *)0x080D8BBC : (u8 *)0x080D797C) + 0x0F;
+    for(u8 keyLen = 0x10; keyLen; keyLen--)
+        *(buf++) = *(addr--);
 }
 
 //Read firm0 from NAND and write to buffer
-void nandFirm0(u8 *outbuf, const u32 size, u8 console){
+void nandFirm0(u8 *outbuf, u32 size, u32 console){
     u8 CTR[0x10];
     getNandCTR(CTR, console);
     aes_advctr(CTR, 0x0B130000/0x10, AES_INPUT_BE | AES_INPUT_NORMAL);
@@ -253,10 +250,9 @@ void nandFirm0(u8 *outbuf, const u32 size, u8 console){
 }
 
 //Decrypts the N3DS arm9bin
-void decArm9Bin(void *armHdr, u8 mode){
+void decArm9Bin(u8 *armHdr, u32 mode){
 
     //Firm keys
-    u8 keyX[0x10];
     u8 keyY[0x10];
     u8 CTR[0x10];
     u8 slot = mode ? 0x16 : 0x15;
@@ -264,9 +260,14 @@ void decArm9Bin(void *armHdr, u8 mode){
     //Setup keys needed for arm9bin decryption
     memcpy(keyY, armHdr+0x10, 0x10);
     memcpy(CTR, armHdr+0x20, 0x10);
-    u32 size = atoi(armHdr+0x30);
+    u32 size = 0;
+    //http://stackoverflow.com/questions/12791077/atoi-implementation-in-c
+    for(u8 *tmp = armHdr+0x30; *tmp; tmp++)
+        size = (size<<3)+(size<<1)+(*tmp)-'0';
 
     if(mode){
+        u8 keyX[0x10];
+
         //Set 0x11 to key2 for the arm9bin and misc keys
         aes_setkey(0x11, key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
         aes_use_keyslot(0x11);
@@ -283,16 +284,17 @@ void decArm9Bin(void *armHdr, u8 mode){
 }
 
 //Sets the N3DS 9.6 KeyXs
-void setKeyXs(void *armHdr){
+void setKeyXs(u8 *armHdr){
+
+    u8 *keyData = armHdr+0x89814;
+    u8 *decKey = keyData+0x10;
 
     //Set keys 0x19..0x1F keyXs
-    void *keyData = armHdr+0x89814;
-    void *decKey = keyData+0x10;
     aes_setkey(0x11, key2, AES_KEYNORMAL, AES_INPUT_BE | AES_INPUT_NORMAL);
     aes_use_keyslot(0x11);
     for(u8 slot = 0x19; slot < 0x20; slot++){
         aes(decKey, keyData, 1, NULL, AES_ECB_DECRYPT_MODE, 0);
         aes_setkey(slot, decKey, AES_KEYX, AES_INPUT_BE | AES_INPUT_NORMAL);
-        *(u8*)(keyData+0xF) += 1;
+        *(keyData+0xF) += 1;
     }
 }
